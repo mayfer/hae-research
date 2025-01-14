@@ -35,12 +35,13 @@ $$H_{\text{ratio}}(f_1, f_2) = -\min_{r} \|\frac{\max(f_1, f_2)}{\min(f_1, f_2)}
 where $r \in \{1.0, 1.5, 2.0, 2.5, 3.0\}$ represents the set of simple frequency ratios associated with harmonic relationships. The implementation in PyTorch is straightforward:
 
 ```python
-def ratio_harmony(f1: torch.Tensor, f2: torch.Tensor) -> torch.Tensor:
+def ratio_harmony(f1: torch.Tensor, f2: torch.Tensor, a1: torch.Tensor, a2: torch.Tensor) -> torch.Tensor:
     ratio = torch.max(f1, f2) / torch.min(f1, f2)
     simple_ratios = torch.tensor([1.0, 1.5, 2.0, 2.5, 3.0], 
                                 device=f1.device)
     distances = torch.abs(ratio - simple_ratios)
-    return -torch.min(distances)
+    # Scale effect by product of amplitudes
+    return -torch.min(distances) * a1 * a2
 ```
 
 ### 3.2 Critical Band Theory
@@ -51,15 +52,16 @@ $$D_{\text{PL}}(f_1, f_2, a_1, a_2) = a_1a_2(e^{-3.5s} - e^{-5.75s})$$
 
 where $s$ is the normalized frequency difference:
 
-$$s = \frac{|f_2 - f_1|}{1.72(f_1 + f_2) \times 10^{-3}}$$
+$$s = \frac{|f_2 - f_1|}{1.72 \times \frac{(f_1 + f_2)}{2} \times 10^{-3}}$$
 
 The implementation includes critical bandwidth considerations:
 
 ```python
-def plomp_levelt_dissonance(f1: torch.Tensor, f2: torch.Tensor, 
-                           a1: torch.Tensor, a2: torch.Tensor) -> torch.Tensor:
-    cb = 1.72 * (f1 + f2) / 2 * 0.001
-    s = torch.abs(f2 - f1) / cb
+def plomp_levelt_dissonance(f1: torch.Tensor, f2: torch.Tensor, a1: torch.Tensor, a2: torch.Tensor) -> torch.Tensor:
+    # Constants from Plomp & Levelt's psychoacoustic experiments
+    cb = 1.72 * (f1 + f2) / 2 * 0.001  # Critical bandwidth scaling
+    s = torch.abs(f2 - f1) / cb        # Normalized frequency difference
+    # Dissonance curve with empirically determined decay constants
     d = torch.exp(-3.5 * s) - torch.exp(-5.75 * s)
     return d * a1 * a2
 ```
@@ -71,11 +73,14 @@ For full spectral representations, we introduce a normalized cross-correlation m
 $$H_{\text{spec}}(s_1, s_2) = \frac{\sum_{i} s_1[i]s_2[i]}{\|s_1\|_2\|s_2\|_2}$$
 
 ```python
-def spectral_harmony(spec1: torch.Tensor, spec2: torch.Tensor) -> torch.Tensor:
-    norm1 = torch.norm(spec1)
-    norm2 = torch.norm(spec2)
+def spectral_harmony(spec1: torch.Tensor, spec2: torch.Tensor, amp1: torch.Tensor, amp2: torch.Tensor) -> torch.Tensor:
+    # Weight spectra by their amplitudes
+    weighted_spec1 = spec1 * amp1
+    weighted_spec2 = spec2 * amp2
+    norm1 = torch.norm(weighted_spec1)
+    norm2 = torch.norm(weighted_spec2)
     eps = 1e-8  # Prevent division by zero
-    correlation = torch.sum(spec1 * spec2) / (norm1 * norm2 + eps)
+    correlation = torch.sum(weighted_spec1 * weighted_spec2) / (norm1 * norm2 + eps)
     return correlation
 ```
 
@@ -83,19 +88,18 @@ def spectral_harmony(spec1: torch.Tensor, spec2: torch.Tensor) -> torch.Tensor:
 
 We quantify alignment with the harmonic series through:
 
-$$H_{\text{align}}(F, A) = -\mathbb{E}_f\big[\min_n|f - nf_0|\big]$$
+$$H_{\text{align}}(F) = -\frac{1}{|F|}\sum_{f \in F}\min_n|f - nf_0|$$
 
 where $F$ is the set of frequencies, $A$ their amplitudes, and $f_0$ the fundamental frequency.
 
 ```python
-def harmonic_alignment(frequencies: torch.Tensor, 
-                      amplitudes: torch.Tensor) -> torch.Tensor:
+def harmonic_alignment(frequencies: torch.Tensor, amplitudes: torch.Tensor) -> torch.Tensor:
     base_freq = frequencies[0]
     harmonics = torch.arange(1, len(frequencies) + 1, 
                            device=frequencies.device) * base_freq
-    alignment = -torch.mean(
-        torch.min(torch.abs(frequencies.unsqueeze(1) - harmonics), dim=1)[0]
-    )
+    # Weight deviations by amplitude
+    deviations = torch.min(torch.abs(frequencies.unsqueeze(1) - harmonics), dim=1)[0]
+    alignment = -torch.sum(deviations * amplitudes) / (torch.sum(amplitudes) + 1e-8)
     return alignment
 ```
 
@@ -103,20 +107,20 @@ def harmonic_alignment(frequencies: torch.Tensor,
 
 The overall training objective for our Harmonic Autoencoder combines reconstruction loss with harmonic constraints:
 
-$\mathcal{L}_\text{total} = \mathcal{L}_\text{recon} + \lambda_h\mathcal{L}_\text{harm} + \lambda_d\mathcal{L}_\text{diss}$
+
+$$\mathcal{L}_\text{total} = \mathcal{L}_\text{recon} + \lambda_h\mathcal{L}_\text{harm} + \lambda_d\mathcal{L}_\text{diss}$$
 
 ### 4.1 Combined Harmony Loss
 
 For the harmonic component, we combine multiple measures into a comprehensive harmony loss:
 
-$\mathcal{L}_\text{harm}(z) = \alpha H_\text{align}(F_z, A_z) + \beta \sum_i \sum_j D_\text{PL}(f_i, f_j, a_i, a_j)$
+$$\mathcal{L}_\text{harm}(z) = \alpha H_\text{align}(F_z, A_z) + \beta \sum_i \sum_j D_\text{PL}(f_i, f_j, a_i, a_j)$$
 
 where $F_z$ and $A_z$ represent frequencies and amplitudes derived from the latent vector $z$, and $\alpha, \beta$ are weighting parameters.
 
 ```python
 class HAELoss(nn.Module):
-    def __init__(self, lambda_h: float = 1.0, lambda_d: float = 0.5,
-                 alpha: float = 1.0, beta: float = 0.5):
+    def __init__(self, lambda_h: float = 1.0, lambda_d: float = 0.5, alpha: float = 1.0, beta: float = 0.5):
         super().__init__()
         self.lambda_h = lambda_h
         self.lambda_d = lambda_d
@@ -151,8 +155,7 @@ class HAELoss(nn.Module):
         
         return harm_align - total_dissonance
     
-    def forward(self, x_recon: torch.Tensor, x: torch.Tensor, 
-                z: torch.Tensor, is_valid: torch.Tensor) -> torch.Tensor:
+    def forward(self, x_recon: torch.Tensor, x: torch.Tensor, z: torch.Tensor, is_valid: torch.Tensor) -> torch.Tensor:
         # Reconstruction loss
         recon_loss = F.mse_loss(x_recon, x)
         
