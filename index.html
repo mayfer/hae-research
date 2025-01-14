@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Markdown + LaTeX Viewer</title>
+    <!-- Import required libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/languages/python.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css">
+
+    <!-- MathJax Configuration must come before loading MathJax -->
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']]
+            },
+            svg: {
+                fontCache: 'global'
+            },
+            startup: {
+                typeset: false // Prevent initial typeset
+            }
+        };
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            height: calc(100vh - 40px);
+        }
+
+        .preview {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+            overflow-y: auto;
+            height: 100%;
+        }
+
+        .toolbar {
+            margin-bottom: 10px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .toolbar button {
+            padding: 8px 16px;
+            background: #0070f3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .toolbar button:hover {
+            background: #0051a2;
+        }
+
+        .error-message {
+            color: #dc2626;
+            margin-top: 8px;
+            font-size: 14px;
+        }
+
+        /* Markdown styling */
+        .preview {
+            color: #333;
+        }
+
+        .preview h1 {
+            font-size: 2em;
+            margin-bottom: 0.5em;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 0.3em;
+        }
+
+        .preview h2 {
+            font-size: 1.5em;
+            margin: 1em 0 0.5em;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 0.3em;
+        }
+
+        .preview code {
+            background-color: #f6f8fa;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-family: ui-monospace, monospace;
+            font-size: 85%;
+        }
+
+        .preview pre {
+            background-color: #f6f8fa;
+            padding: 16px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 1em 0;
+        }
+
+        .preview pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .preview p {
+            margin: 1em 0;
+        }
+
+        .preview strong {
+            font-weight: 600;
+        }
+
+        .preview em {
+            font-style: italic;
+        }
+
+        .preview .math {
+            overflow-x: auto;
+            margin: 1em 0;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="toolbar">
+            <button onclick="reloadFile()">Reload File</button>
+            <div id="error" class="error-message"></div>
+        </div>
+        <div class="preview" id="preview"></div>
+    </div>
+
+    <script>
+        // Configure marked with syntax highlighting
+        marked.setOptions({
+            highlight: function(code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    try {
+                        return hljs.highlight(code, { language: lang }).value;
+                    } catch (err) {}
+                }
+                return code;
+            }
+        });
+
+        // Function to safely typeset math
+        function typesetMath() {
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise()
+                    .catch((err) => console.log('MathJax error:', err));
+            }
+        }
+
+        async function loadFile() {
+            try {
+                const response = await fetch('./index.md');
+                const content = await response.text();
+                document.getElementById('preview').innerHTML = marked.parse(content);
+                document.getElementById('error').textContent = '';
+                typesetMath();
+            } catch (error) {
+                document.getElementById('error').textContent = error.message;
+                console.error('Error loading file:', error);
+            }
+        }
+
+        function reloadFile() {
+            loadFile();
+        }
+
+        // Wait for MathJax to be ready before initial load
+        window.addEventListener('load', function() {
+            if (window.MathJax) {
+                window.MathJax.startup.promise.then(() => {
+                    loadFile();
+                });
+            } else {
+                loadFile();
+            }
+        });
+    </script>
+</body>
+</html>
